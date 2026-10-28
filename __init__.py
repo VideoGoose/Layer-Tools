@@ -30,17 +30,15 @@ ADDING AN ACTION
     order: @action(..., multi=True, min_layers=2); fn(layers, track) returns
     a list of dicts, each with a 'layer' key.
 
-SAFETY RULES (added 26 Oct 2026, after the 23 Oct transition crashes)
-    * Never hand playback objects (PlayHead / modules) to track edit calls.
-      This module no longer touches the playhead at all.
+DESIGN RULES
     * One attempt per edit. If an edit cannot be verified, report it; never
       retry it a different way.
     * Only act on layers that sit directly on the current track.
     * Refuse to create a second blur for a layer that already has one.
     * Problems are reported in 'warnings', not swallowed.
-    * Arrows need Modules, i.e. playback objects. The only exception to the
-      rule above is the 'Blur' button: Video -> its own blur layer,
-      transport stopped, one attempt, verified. Nothing else makes arrows.
+    * Arrows need Modules, which only the playhead hands out. Only the 'Blur'
+      button makes arrows: Video -> its own blur layer, transport stopped,
+      one attempt, verified.
 
 Documented API used (developer.disguise.one, d3.pyi):
     guisystem.selectedLayers               layers selected in the GUI
@@ -70,7 +68,7 @@ class Problem(ValueError):
     replaces it with d3's Exception class, which can't be built from a string
     ("TypeError: Can't construct Exception(str)", 26 Oct)."""
 
-VERSION = '0.9.1'
+VERSION = '0.9.2'
 
 # How a linked field refers to the same field on another layer. getByUID()
 # survives renames; the field is appended with a dot.
@@ -501,10 +499,9 @@ def _arrow_between(track, src, dst):
     return None
 
 
-# The plugin never makes arrows. track.makeArrow() only takes Modules
-# ("Cannot convert from 'Layer' to 'Module'", 26 Oct), and the only way to get
-# a Module is PlayHead.getModuleForLayer, which is where the 23 Oct crashes
-# start. Only the Blur button makes an arrow, with the guards in _blur.
+# track.makeArrow() only takes Modules ("Cannot convert from 'Layer' to
+# 'Module'"), and the only way to get a Module is PlayHead.getModuleForLayer.
+# Only the Blur button makes an arrow, with the guards in _blur.
 
 def _arrows_into(track, dst):
     du = _uid_or_none(dst)
@@ -760,10 +757,10 @@ def _make_blur(layer, track, cls, out):
         'and mapping, opacity UID-linked, pipes this layer into it, then sets this layer to Alpha. '
         'Playback must be stopped. Click again to finish if it stops part way. Select either layer.')
 def _blur(layer, track):
-    # The one place the plugin touches playback objects (getModuleForLayer, the
-    # call in the 23 Oct crash traces). Guards: everything is checked before
-    # anything is made; transport stopped; Video -> its own blur only; one
-    # attempt per step, verified, never retried another way.
+    # The one place the plugin uses the playhead (getModuleForLayer, needed
+    # for makeArrow). Guards: everything is checked before anything is made;
+    # transport stopped; Video -> its own blur only; one attempt per step,
+    # verified, never retried another way.
     src, blur = _blur_pair(layer, track)
     mt = getattr(getattr(src, 'moduleType', None), '__name__', u'?')
     if mt not in VIDEO_CLASSES:

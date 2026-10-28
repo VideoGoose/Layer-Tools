@@ -7,12 +7,10 @@ Open **Layer Tools** from Designer's plugin menu, select one or more layers, cli
 The log at the bottom reports per layer what happened. **↻** re-reads `__init__.py`, so you can edit
 actions without restarting Designer. **?** dumps the selected layer's field names.
 
-## Safety (after the 23 Oct 2026 transition crashes)
-- Never hands playback objects (PlayHead / modules) to track edits, except the Blur button (below).
+## Design rules
 - **Arrows:** `track.makeArrow` only accepts Modules ("Cannot convert from 'Layer' to 'Module'"), and the only
-  way to get one is `PlayHead.getModuleForLayer`. The **Blur** button is the single exception to the
-  rule above: Video layer to its own blur only, transport stopped, one attempt, checked. Nothing else makes
-  arrows; drawing the arrow by hand always works.
+  way to get one is `PlayHead.getModuleForLayer`. Only the **Blur** button makes arrows: Video layer to its
+  own blur only, transport stopped, one attempt, checked. Drawing the arrow by hand always works.
 - One attempt per edit. If an edit can't be verified it's reported, never retried another way.
 - Blur never makes a second blur layer for a layer that already has one; clicking again only finishes the
   missing steps.
@@ -20,7 +18,7 @@ actions without restarting Designer. **?** dumps the selected layer's field name
   other track).
 - Problems that used to be swallowed show in the log as `!` warnings; a layer with any failure shows ✗.
 - **⇄ Check arrows** (header) is read-only: lists arrows on the current track that are invalid, duplicated,
-  or point at something that isn't a layer on that track. Safe to run on the show project.
+  or point at something that isn't a layer on that track. It changes nothing.
 - The window only asks Designer for the selection every 2 s, and pauses after 30 s without mouse or keyboard
   use in the window (the selection line dims). Each check runs Python on Designer's main thread.
 
