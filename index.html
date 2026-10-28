@@ -1,0 +1,331 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta name="disguise-plugin-window-size" content="260,360">
+<meta name="disguise-plugin-window-min-size" content="180,140">
+<meta name="disguise-plugin-window-resizable" content="true">
+<title>Layer Tools v0.9.1</title>
+<style>
+  :root {
+    --bg: #15171a; --panel: #1d2024; --line: #2c3036; --text: #d8dce2; --dim: #8a929c;
+    --accent: #f2b33d; --live: #3ecf6e; --warn: #e5534b; --field: #111316;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 11px/1.3 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; gap: 4px; align-items: center; padding: 4px 6px; background: var(--panel);
+    border-bottom: 1px solid var(--line); }
+  .title { font-weight: 700; }
+  .ver { font: 600 10px/1 ui-monospace, Menlo, Consolas, monospace; color: #111; background: var(--accent);
+    padding: 2px 4px; border-radius: 3px; }
+  .ver.stale { background: var(--warn); color: #fff; }
+  .spacer { flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); margin-left: 2px; }
+  .dot.on { background: var(--live); box-shadow: 0 0 5px var(--live); }
+  .dot.err { background: var(--warn); }
+  button { background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 3px;
+    font: inherit; padding: 3px 6px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--dim); }
+  button:disabled { opacity: .45; cursor: default; }
+  header button { padding: 1px 5px; }
+  .sel { padding: 3px 6px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sel b { color: var(--text); font-weight: 600; }
+  .find { display: flex; gap: 3px; padding: 0 6px 3px; }
+  .find input { flex: 1; min-width: 0; background: var(--field); color: var(--text); border: 1px solid var(--line);
+    border-radius: 3px; font: 10px ui-monospace, Menlo, Consolas, monospace; padding: 3px 5px; }
+  .find input:focus { outline: none; border-color: var(--accent); }
+  #list { display: flex; flex-direction: column; gap: 3px; padding: 3px 6px 6px; overflow-y: auto; flex: 0 1 auto; }
+  #list button { text-align: left; width: 100%; }
+  #list button:hover:not(:disabled) { border-color: var(--accent); color: #fff; }
+  #list .grouphd { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line); color: var(--dim);
+    font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+  #list .grid { display: grid; grid-template-columns: auto auto auto auto; gap: 3px; }
+  #list .grid button { text-align: center; padding: 3px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #log { flex: 1; min-height: 36px; margin: 0; padding: 4px 6px; overflow: auto; border-top: 1px solid var(--line);
+    font: 10px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--dim); white-space: pre-wrap; }
+  #log .ok { color: var(--live); } #log .bad { color: var(--warn); } #log .hd { color: var(--text); }
+  #log .warn { color: var(--accent); }
+  .sel.stale { opacity: .5; }
+</style>
+</head>
+<body>
+<header>
+  <span class="title">Layer Tools</span><span class="ver" id="ver">v0.9.1</span>
+  <span class="spacer"></span>
+  <button id="arrows" title="Check arrows (read-only): list arrows on this track that are invalid, duplicated, or point at something that isn't a layer here">&#x21c4;</button>
+  <button id="probe" title="Probe: dump the selected layer's fields to the log">?</button>
+  <button id="target" title="Which Designer reads the selection">this PC</button>
+  <button id="reconnect" title="Reload the Python helper from this folder">&#x21bb;</button>
+  <span class="dot" id="status" title="connecting…"></span>
+</header>
+<div class="sel" id="sel"></div>
+<div class="find"><input id="uidIn" placeholder="UID 0x… → jump to layer" spellcheck="false"><button id="uidGo">Find</button></div>
+<div id="list"></div>
+<pre id="log"></pre>
+<script>
+(function () {
+  'use strict';
+  var VERSION = '0.9.1';
+  var REG_NAME = 'gus_lt';               // registered fresh from __init__.py each time the window opens
+  var AUTO_NAME = 'gus_layertools';      // the same code, auto-loaded by Designer at startup
+  var $ = function (id) { return document.getElementById(id); };
+  var apiBase = '', mod = REG_NAME, busy = false, selected = [];
+  var store = { get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+                set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+
+  function status(cls, txt) { $('status').className = 'dot ' + cls; $('status').title = txt; }
+  function log(text, cls) {
+    var s = document.createElement('span'); if (cls) s.className = cls;
+    s.textContent = text + '\n'; $('log').appendChild(s); $('log').scrollTop = 1e9;
+  }
+
+  // ---- Designer API (same discovery as Test Pattern+) -------------------
+  function http(method, path, body, base) {
+    var url = (base === undefined ? apiBase : base) + path;
+    return fetch(url, { method: method, headers: body ? { 'Content-Type': 'application/json' } : {},
+                        body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        return r.text().then(function (t) {
+          if (!r.ok) throw new Error('HTTP ' + r.status + ' from ' + path + (t ? ' — ' + t.replace(/\s+/g, ' ').slice(0, 200) : ''));
+          try { return JSON.parse(t); } catch (e) { throw new Error('not JSON from ' + url); }
+        });
+      }, function (e) { throw new Error('no response from ' + url + ' (' + e.message + ')'); });
+  }
+  function normBase(s) {
+    s = (s || '').trim().replace(/\/+$/, '');
+    return !s ? '' : /^https?:\/\//.test(s) ? s : 'http://' + s;
+  }
+  // Target 'local': the Designer on the machine this window is open on, so its
+  // GUI selection is used (an editor's own). 'director': Designer's ?director=.
+  var target = store.get('lt.target') === 'director' ? 'director' : 'local';
+  function candidateBases() {
+    var qs = new URLSearchParams(location.search), out = [];
+    // Designer's API may be on 80, 81 (seen 26 Oct) or 8080.
+    var local = [];
+    ['localhost', '127.0.0.1'].forEach(function (h) {
+      ['', ':81', ':8080'].forEach(function (p) { local.push('http://' + h + p); });
+    });
+    if (target === 'local') out = out.concat(local);
+    ['director', 'd3', 'host'].forEach(function (k) { if (qs.get(k)) out.push(normBase(qs.get(k))); });
+    if (store.get('lt.api.' + target)) out.push(normBase(store.get('lt.api.' + target)));
+    if (/^https?:$/.test(location.protocol)) out.push('');
+    var h = /^https?:$/.test(location.protocol) ? location.hostname : 'localhost';
+    [80, 81, 8080].forEach(function (p) { out.push('http://' + h + (p === 80 ? '' : ':' + p)); });
+    return out.filter(function (b, i) { return out.indexOf(b) === i; });
+  }
+  function findApi(list) {
+    if (!list.length) return Promise.reject(new Error('Designer\'s API not found'));
+    return http('GET', '/api/session/status/session', undefined, list[0])
+      .then(function () { apiBase = list[0]; store.set('lt.api.' + target, apiBase); },
+            function () { return findApi(list.slice(1)); });
+  }
+  function pyArg(v) { return typeof v === 'number' ? String(v) : 'u' + JSON.stringify(String(v)); }
+  function call(fn) {
+    var args = [].slice.call(arguments, 1).map(pyArg).join(', ');
+    return http('POST', '/api/session/python/execute', { moduleName: mod, script: 'return ' + fn + '(' + args + ')' })
+      .then(function (r) {
+        var rv = r.returnValue;     // JSON text from the helper, possibly encoded twice
+        for (var i = 0; i < 3 && typeof rv === 'string'; i++) { try { rv = JSON.parse(rv); } catch (e) { break; } }
+        if (rv && typeof rv === 'object') return rv;
+        throw new Error(fn + '() in ' + mod + ' gave no result ' + JSON.stringify(r.status || r).slice(0, 300));
+      });
+  }
+
+  // Register the helper from this folder so edits to __init__.py apply on
+  // Reload, without restarting Designer. Falls back to the auto-loaded copy.
+  function register() {
+    return fetch('__init__.py?' + Date.now()).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    }).then(function (src) {
+      return http('POST', '/api/session/python/registermodule', { moduleName: REG_NAME, contents: src });
+    }).then(function (r) {
+      if (r && r.status && r.status.code) throw new Error(JSON.stringify(r.status));
+      mod = REG_NAME;
+    }).catch(function (e) {
+      log('register from folder failed (' + e.message + ') → using auto-loaded ' + AUTO_NAME, 'bad');
+      mod = AUTO_NAME;
+    });
+  }
+
+  // ---- UI -----------------------------------------------------------------
+  // Ungrouped actions first, one per row; then each group (e.g. "Link to
+  // parent") under its own header, as a grid of small buttons.
+  function renderActions(list) {
+    var box = $('list'), groups = {}, order = [];
+    box.innerHTML = '';
+    function button(a) {
+      var b = document.createElement('button'); b.className = 'run';
+      b.textContent = a.label; b.title = a.desc; b.dataset.min = a.min || 1;
+      b.onclick = function () { run(a); };
+      return b;
+    }
+    list.forEach(function (a) {
+      if (!a.group) { box.appendChild(button(a)); return; }
+      if (!groups[a.group]) { groups[a.group] = []; order.push(a.group); }
+      groups[a.group].push(a);
+    });
+    order.forEach(function (g) {
+      var h = document.createElement('div'); h.className = 'grouphd'; h.textContent = g;
+      h.title = 'Select 2+ layers: the first (★) is the parent';
+      var grid = document.createElement('div'); grid.className = 'grid';
+      groups[g].forEach(function (a) { grid.appendChild(button(a)); });
+      box.appendChild(h); box.appendChild(grid);
+    });
+    syncButtons();
+  }
+  function syncButtons() {
+    [].forEach.call(document.querySelectorAll('button.run'), function (b) { b.disabled = busy || selected.length < +(b.dataset.min || 1); });
+  }
+  function showSelected(names) {
+    selected = names || [];
+    $('sel').innerHTML = '';
+    $('sel').appendChild(document.createTextNode(selected.length + ' selected: '));
+    // With 2+ selected, mark the first: it is the parent for "Link move to parent".
+    var b = document.createElement('b');
+    b.textContent = !selected.length ? 'none' : selected.length > 1 ? '★' + selected.join(', ') : selected[0];
+    $('sel').title = selected.length > 1 ? 'Parent (★): ' + selected[0] + '\nChildren: ' + selected.slice(1).join(', ')
+                                         : selected.join('\n');
+    $('sel').appendChild(b);
+    syncButtons();
+  }
+
+  function run(a) {
+    if (busy) return;
+    busy = true; syncButtons();
+    log(a.label + ' on ' + selected.join(', '), 'hd');
+    call('run', a.id).then(function (r) {
+      if (!r.ok) { log('  ✗ ' + r.error, 'bad'); return; }
+      r.results.forEach(function (x) {
+        if (x.error) { log('  ✗ ' + x.layer + ': ' + x.error, 'bad'); return; }
+        log('  ' + (x.ok ? '✓ ' : '✗ ') + x.layer + (x.created ? ' → ' + x.created : '') + (x.note ? ' · ' + x.note : ''),
+            x.ok ? 'ok' : 'bad');
+        if (x.example) log('    ' + x.example);
+        if (x.next) log('    → ' + x.next, 'warn');
+        (x.failed || []).forEach(function (f) { log('    ✗ ' + f.field + ': ' + f.error, 'bad'); });
+        (x.warnings || []).forEach(function (w) { log('    ! ' + w, 'warn'); });
+      });
+    }).catch(function (e) { log('  ✗ ' + e.message, 'bad'); })
+      .then(function () { busy = false; syncButtons(); poll(); });
+  }
+
+  // Each poll runs Python on Designer's main thread, so keep it rare: every
+  // POLL_MS, and only while someone has used this window in the last IDLE_MS.
+  // After that it pauses until the mouse or keyboard is used here again.
+  var POLL_MS = 2000, IDLE_MS = 30000, lastUse = Date.now(), pollTimer = null, paused = false;
+  function used() {
+    lastUse = Date.now();
+    if (paused) { paused = false; poll(); }
+  }
+  ['mousemove', 'mousedown', 'keydown', 'focus'].forEach(function (ev) { window.addEventListener(ev, used, true); });
+  function poll() {
+    clearTimeout(pollTimer);
+    if (document.hidden || Date.now() - lastUse > IDLE_MS) {
+      paused = true;
+      status('', 'paused — move the mouse over this window to resume');
+      $('sel').classList.add('stale');
+      return;
+    }
+    $('sel').classList.remove('stale');
+    call('info').then(function (r) {
+      if (r.version && r.version !== VERSION) {
+        $('ver').classList.add('stale');
+        $('ver').title = 'Window v' + VERSION + ', helper v' + r.version;
+      }
+      showSelected(r.selected);
+      var who = (r.machine || '?') + (r.role ? ' (' + r.role + ')' : '');
+      $('target').title = 'Using ' + who + ' at ' + (apiBase || location.origin) + ' — click to use the ' +
+        (target === 'local' ? 'director' : 'machine this window is on') + ' instead';
+      status('on', 'connected to ' + who);
+    }).catch(function () { status('err', 'Designer not reachable'); })
+      .then(function () { pollTimer = setTimeout(poll, POLL_MS); });
+  }
+
+  function connect() {
+    clearTimeout(pollTimer);
+    status('', 'connecting…');
+    return findApi(candidateBases())
+      .then(register)
+      .then(function () { return call('actions'); })
+      .then(function (r) {
+        if (!r.ok) throw new Error(r.error);
+        renderActions(r.actions);
+        return call('info').then(function (i) {
+          log('connected to ' + (i.machine || '?') + (i.role ? ' (' + i.role + ')' : '') + ' at ' +
+              (apiBase || location.origin) + ' · ' + r.actions.length + ' actions');
+          if (target === 'local' && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(apiBase))
+            log('  this machine\'s API not reachable, fell back to ' + (apiBase || location.origin), 'bad');
+        }).then(poll);
+      })
+      .catch(function (e) { status('err', 'Designer not reachable'); log('✗ ' + e.message, 'bad'); });
+  }
+
+  // ---- UID search: find the layer, then move the playhead to its start ---
+  function transports() {
+    return http('GET', '/api/session/transport/activetransport').then(function (r) {
+      var t = r.result || r.transports || r;
+      t = Array.isArray(t) ? t : [t];
+      t = t.filter(function (x) { return x && (x.uid || x.name); })
+           .map(function (x) { return { uid: x.uid || '', name: x.name || '' }; });
+      if (!t.length) throw new Error('no active transport ' + JSON.stringify(r).slice(0, 200));
+      return t;
+    });
+  }
+  function transportCall(path, extra, ts) {
+    return http('POST', '/api/session/transport/' + path, { transports: ts.map(function (t) {
+      return Object.assign({ transport: t, playmode: 'Stop' }, extra);
+    }) }).then(function (r) {
+      if (r && r.status && r.status.code) throw new Error(path + ': ' + (r.status.message || JSON.stringify(r.status)));
+      return r;
+    });
+  }
+  function findUid() {
+    var text = $('uidIn').value.trim();
+    if (!text || busy) return;
+    busy = true; syncButtons(); $('uidGo').disabled = true;
+    log('Find ' + text, 'hd');
+    var hit;
+    call('find_uid', text).then(function (r) {
+      if (!r.ok) throw new Error(r.error);
+      hit = r;
+      if (!r.isLayer) { log('  ' + r.uid + ' is ' + r.type + ' "' + r.name + '" (not a layer, nothing to jump to)', 'ok'); return; }
+      return transports().then(function (ts) {
+        var go = r.onCurrentTrack ? Promise.resolve() : transportCall('gototrack', { track: { name: r.track } }, ts);
+        return go.then(function () { return transportCall('gototime', { time: r.time }, ts); });
+      }).then(function () {
+        log('  ✓ ' + hit.name + ' · ' + hit.track + ' @ ' + hit.time.toFixed(2) + 's', 'ok');
+      });
+    }).catch(function (e) { log('  ✗ ' + e.message, 'bad'); })
+      .then(function () { busy = false; syncButtons(); $('uidGo').disabled = false; });
+  }
+  $('uidGo').onclick = findUid;
+  $('uidIn').onkeydown = function (e) { if (e.key === 'Enter') findUid(); };
+
+  function showTarget() { $('target').textContent = target === 'local' ? 'this PC' : 'director'; }
+  $('target').onclick = function () {
+    target = target === 'local' ? 'director' : 'local';
+    store.set('lt.target', target); showTarget(); connect();
+  };
+  showTarget();
+  $('reconnect').onclick = connect;
+  $('arrows').onclick = function () {
+    log('Check arrows (read-only)', 'hd');
+    call('check_arrows').then(function (r) {
+      if (!r.ok) { log('  ✗ ' + r.error, 'bad'); return; }
+      log('  ' + r.track + ': ' + r.note, r.suspicious.length ? 'warn' : 'ok');
+      r.suspicious.forEach(function (a) { log('  ! ' + a.arrow + ' — ' + a.problems.join('; '), 'warn'); });
+    }, function (e) { log('  ✗ ' + e.message, 'bad'); });
+  };
+  $('probe').onclick = function () {
+    call('probe').then(function (r) { log(JSON.stringify(r, null, 1)); }, function (e) { log('✗ ' + e.message, 'bad'); });
+  };
+  showSelected([]);
+  connect();
+})();
+</script>
+</body>
+</html>
