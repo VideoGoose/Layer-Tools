@@ -1,6 +1,24 @@
 # Layer Tools
 
-A list of one-click actions applied to the layers selected in Designer's timeline.
+A disguise Designer plugin: a list of one-click actions applied to the layers selected in the timeline.
+
+> **Beta — use at your own risk.** Layer Tools edits your project from Designer's Python API. Save your
+> project before using it, and test it on a copy before using it on a show file.
+
+<img src="docs/screenshot.png" alt="The Layer Tools window" width="294">
+
+## Features
+- **Duplicate + UID link** — copies a layer and links every number field to the original by UID, so the copy
+  follows it.
+- **Link to parent** — select several layers; the first is the parent and the rest follow its Opacity, Tint,
+  Time, Colour Shift, Move, Crop or Colour fields.
+- **Blur** — adds a blur layer fed from a Video layer, matching its blend mode, mapping and opacity, and sets
+  the source to Alpha.
+- **Anchor to bottom** — puts an expression on position y that keeps the layer at the bottom.
+- **Clear expressions** — resets every expression on a layer back to `self`.
+- **Show UID** / **Find by UID** — shows a layer's UID, or jumps the playhead to the layer with a given UID.
+- **Check arrows** — read-only list of broken or duplicated arrows on the current track.
+- **This PC / director** — works from an editor machine using that machine's own selection.
 
 ## Use
 Open **Layer Tools** from Designer's plugin menu, select one or more layers, click an action (hover for what it does).
@@ -48,7 +66,7 @@ layers, so the log names the layer rather than highlighting it. Uses `/api/sessi
 ## Link to parent
 Buttons at the bottom of the list, under **Link to parent**. Select 2+ layers: the first (marked ★) is the
 parent; every other selected layer gets each field in that section set to `getByUID(0x<parent>).<field>`.
-Only number fields are linked (an expression on a media/resource field crashes playback); others are
+Only number fields are linked (Designer can't evaluate an expression on a media/resource field); others are
 skipped and named in the log. Fields are in `LINK_GROUPS`:
 
 | Button | Fields |
@@ -86,7 +104,7 @@ dicts, one per layer, each with a `layer` key. The button stays disabled until e
 ## Tuning
 - `LINK_EXPR` — the link expression form. If Designer wants a different UID syntax, change this one line.
 - `LINK_SKIP` — internal field names never linked.
-- `LINK_SEQ_TYPES` — which field kinds get linked. Default `FloatSequence` only: linking a resource field (video, mapping) crashes playback with "Bad dynamic_cast".
+- `LINK_SEQ_TYPES` — which field kinds get linked. Default `FloatSequence` only: Designer can't evaluate an expression on a resource field (video, mapping) and reports "Bad dynamic_cast".
 - `NAME_LINK_EXPR` — used instead of `LINK_EXPR` for fields whose name starts with a digit (`1st brightness`):
   Designer rejects `getByUID(0x…).1st_brightness` ("UnexpectedToken") but accepts
   `module:Gradient.1st_brightness`. Those links follow the layer **name**, so they break if it's renamed; the
