@@ -7,7 +7,9 @@
 <meta name="disguise-plugin-window-size" content="260,360">
 <meta name="disguise-plugin-window-min-size" content="180,140">
 <meta name="disguise-plugin-window-resizable" content="true">
-<title>Layer Tools v0.9.2</title>
+<title>Layer Tools v0.9.7</title>
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="icon" type="image/png" sizes="256x256" href="icon.png">
 <style>
   :root {
     --bg: #15171a; --panel: #1d2024; --line: #2c3036; --text: #d8dce2; --dim: #8a929c;
@@ -17,14 +19,15 @@
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 11px/1.3 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   body { display: flex; flex-direction: column; }
-  header { display: flex; gap: 4px; align-items: center; padding: 4px 6px; background: var(--panel);
+  header { display: flex; gap: 3px; align-items: center; padding: 4px 6px; background: var(--panel); white-space: nowrap;
     border-bottom: 1px solid var(--line); }
   .title { font-weight: 700; }
+  .logo { width: 16px; height: 16px; flex: none; }
   .ver { font: 600 10px/1 ui-monospace, Menlo, Consolas, monospace; color: #111; background: var(--accent);
     padding: 2px 4px; border-radius: 3px; }
   .ver.stale { background: var(--warn); color: #fff; }
   .spacer { flex: 1; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); margin-left: 2px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); margin-left: 1px; flex: none; }
   .dot.on { background: var(--live); box-shadow: 0 0 5px var(--live); }
   .dot.err { background: var(--warn); }
   button { background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 3px;
@@ -38,6 +41,16 @@
   .find input { flex: 1; min-width: 0; background: var(--field); color: var(--text); border: 1px solid var(--line);
     border-radius: 3px; font: 10px ui-monospace, Menlo, Consolas, monospace; padding: 3px 5px; }
   .find input:focus { outline: none; border-color: var(--accent); }
+  .follow { display: flex; flex-wrap: wrap; gap: 3px 4px; align-items: center; padding: 0 6px 3px; min-width: 0; }
+  .follow button { padding: 2px 6px; white-space: nowrap; flex: 1 1 auto; text-align: left; }
+  .follow button.on { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
+  #followTxt { flex: 1 1 100%; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #followTxt:empty { display: none; }
+  #followTxt.live { color: var(--live); }
+  /* In-page tooltip: Designer draws plugin windows off-screen, where native title tooltips may not show. */
+  #tip { position: fixed; z-index: 50; display: none; max-width: 240px; padding: 6px 8px; border-radius: 4px;
+    background: var(--panel); border: 1px solid var(--dim); color: var(--text); font-size: 11px; line-height: 1.35;
+    white-space: pre-line; box-shadow: 0 4px 12px rgba(0, 0, 0, .5); pointer-events: none; }
   #list { display: flex; flex-direction: column; gap: 3px; padding: 3px 6px 6px; overflow-y: auto; flex: 0 1 auto; }
   #list button { text-align: left; width: 100%; }
   #list button:hover:not(:disabled) { border-color: var(--accent); color: #fff; }
@@ -54,7 +67,7 @@
 </head>
 <body>
 <header>
-  <span class="title">Layer Tools</span><span class="ver" id="ver">v0.9.2</span>
+  <img class="logo" src="icon.svg" alt=""><span class="title">Layer Tools</span><span class="ver" id="ver">v0.9.7</span>
   <span class="spacer"></span>
   <button id="arrows" title="Check arrows (read-only): list arrows on this track that are invalid, duplicated, or point at something that isn't a layer here">&#x21c4;</button>
   <button id="probe" title="Probe: dump the selected layer's fields to the log">?</button>
@@ -64,16 +77,18 @@
 </header>
 <div class="sel" id="sel"></div>
 <div class="find"><input id="uidIn" placeholder="UID 0x… → jump to layer" spellcheck="false"><button id="uidGo">Find</button></div>
+<div class="follow"><button id="sync"></button><span id="followTxt"></span></div>
 <div id="list"></div>
 <pre id="log"></pre>
+<div id="tip" role="tooltip"></div>
 <script>
 (function () {
   'use strict';
-  var VERSION = '0.9.2';
+  var VERSION = '0.9.7';
   var REG_NAME = 'gus_lt';               // registered fresh from __init__.py each time the window opens
   var AUTO_NAME = 'gus_layertools';      // the same code, auto-loaded by Designer at startup
   var $ = function (id) { return document.getElementById(id); };
-  var apiBase = '', mod = REG_NAME, busy = false, selected = [];
+  var apiBase = '', mod = REG_NAME, busy = false, selected = [], session = null, helperSrc = null;
   var store = { get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
                 set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
 
@@ -120,20 +135,20 @@
   function findApi(list) {
     if (!list.length) return Promise.reject(new Error('Designer\'s API not found'));
     return http('GET', '/api/session/status/session', undefined, list[0])
-      .then(function () { apiBase = list[0]; store.set('lt.api.' + target, apiBase); },
+      .then(function (s) { apiBase = list[0]; session = (s && s.result) || s || null; store.set('lt.api.' + target, apiBase); },
             function () { return findApi(list.slice(1)); });
   }
   function pyArg(v) { return typeof v === 'number' ? String(v) : 'u' + JSON.stringify(String(v)); }
-  function call(fn) {
-    var args = [].slice.call(arguments, 1).map(pyArg).join(', ');
-    return http('POST', '/api/session/python/execute', { moduleName: mod, script: 'return ' + fn + '(' + args + ')' })
+  function execOn(base, m, fn, args) {
+    return http('POST', '/api/session/python/execute', { moduleName: m, script: 'return ' + fn + '(' + args.map(pyArg).join(', ') + ')' }, base)
       .then(function (r) {
         var rv = r.returnValue;     // JSON text from the helper, possibly encoded twice
         for (var i = 0; i < 3 && typeof rv === 'string'; i++) { try { rv = JSON.parse(rv); } catch (e) { break; } }
         if (rv && typeof rv === 'object') return rv;
-        throw new Error(fn + '() in ' + mod + ' gave no result ' + JSON.stringify(r.status || r).slice(0, 300));
+        throw new Error(fn + '() in ' + m + ' gave no result ' + JSON.stringify(r.status || r).slice(0, 300));
       });
   }
+  function call(fn) { return execOn(undefined, mod, fn, [].slice.call(arguments, 1)); }
 
   // Register the helper from this folder so edits to __init__.py apply on
   // Reload, without restarting Designer. Falls back to the auto-loaded copy.
@@ -142,6 +157,7 @@
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
     }).then(function (src) {
+      helperSrc = src;
       return http('POST', '/api/session/python/registermodule', { moduleName: REG_NAME, contents: src });
     }).then(function (r) {
       if (r && r.status && r.status.code) throw new Error(JSON.stringify(r.status));
@@ -246,6 +262,7 @@
   }
 
   function connect() {
+    dirReady = null;
     clearTimeout(pollTimer);
     status('', 'connecting…');
     return findApi(candidateBases())
@@ -323,8 +340,159 @@
   $('probe').onclick = function () {
     call('probe').then(function (r) { log(JSON.stringify(r, null, 1)); }, function (e) { log('✗ ' + e.message, 'bad'); });
   };
+  // ---- Output sync on an editor unlocked from the director (hold / fade up /
+  // fade down). One button cycles three modes:
+  //   off     nothing (default)
+  //   follow  editor follows director: copy the director's mode here
+  //   lead    director follows editor: send this machine's mode to the director,
+  //           through the director's own API (plugin Python only changes the
+  //           machine it runs on), sent once per change so a failed send is
+  //           never repeated in a loop
+  // Runs while not off, even when the selection poll is paused; slower when
+  // there's nothing to sync.
+  var SYNC_MS = 1000, SYNC_IDLE_MS = 5000, syncTimer = null;
+  var MODE_NAMES = ['fade down', 'fade up', 'hold'];
+  var SYNC_MODES = ['off', 'follow', 'lead'];
+  var SYNC_LABELS = { off: 'Output sync: off', follow: 'Editor follows director', lead: 'Director follows editor' };
+  var SYNC_TIP = 'Output sync (hold / fade up / fade down). Click to cycle:\n' +
+    '• Off: nothing is synced.\n' +
+    '• Editor follows director: when the director\'s output changes, this editor copies it.\n' +
+    '• Director follows editor: when this editor\'s output changes, the director copies it ' +
+    '(this changes the director\'s output).\n' +
+    'Works on an editor that is unlocked from the director. Does nothing on the director, in Solo, ' +
+    'or on a locked editor. Keep this window open on the editor.';
+  var syncMode = SYNC_MODES.indexOf(store.get('lt.sync')) >= 0 ? store.get('lt.sync') : 'off';
+  var lastPushed = null, lastErr = '', director = null, dirReady = null, sent = null, SENT_WAIT_MS = 3000;
+  function followText(cls, txt, tip) { var el = $('followTxt'); el.className = cls; el.textContent = txt; el.title = tip || txt; }
+  // Hover tooltip from data-tip, drawn in the page and kept inside the window.
+  function showTip(el) {
+    var t = $('tip'), r = el.getBoundingClientRect();
+    t.textContent = el.dataset.tip || '';
+    t.style.display = 'block';
+    var w = t.offsetWidth, h = t.offsetHeight;
+    t.style.left = Math.max(4, Math.min(r.left, innerWidth - w - 4)) + 'px';
+    t.style.top = (r.bottom + 4 + h <= innerHeight - 4 ? r.bottom + 4 : Math.max(4, r.top - h - 4)) + 'px';
+  }
+  function hideTip() { $('tip').style.display = 'none'; }
+  $('sync').onmouseenter = function () { showTip(this); };
+  $('sync').onmouseleave = hideTip;
+  function showSync() {
+    var b = $('sync');
+    b.textContent = SYNC_LABELS[syncMode];
+    b.classList.toggle('on', syncMode !== 'off');
+    b.dataset.tip = SYNC_TIP + '\n\nNow: ' + SYNC_LABELS[syncMode] + '.';
+    if ($('tip').style.display === 'block') showTip(b);
+    if (syncMode === 'off') followText('', '');
+  }
+  // Where the director's API might be. Designer's session status names the
+  // director; ?director= on this page may be this machine's own address, so
+  // it goes last and every candidate is checked before use.
+  function directorCandidates() {
+    var out = [], port = '';
+    try { port = new URL(apiBase || location.href).port; } catch (e) {}
+    var p = port ? ':' + port : '';
+    var h = session && session.director && session.director.hostname;
+    if (h) {
+      out.push('http://' + h + p);
+      if (h.indexOf('.') < 0) out.push('http://' + h + '.local' + p);
+    }
+    var qs = new URLSearchParams(location.search);
+    ['director', 'd3', 'host'].forEach(function (k) { if (qs.get(k)) out.push(normBase(qs.get(k))); });
+    return out.filter(function (b, i) { return out.indexOf(b) === i; });
+  }
+  // Load the helper at a candidate and ask it which machine it is; reject this
+  // machine and anything that says it isn't the director.
+  function tryDirector(list, here, errs) {
+    if (!list.length) return Promise.reject(new Error('director not found (' + (errs.join('; ') || 'no address to try') + ')'));
+    var b = list[0];
+    var reg = helperSrc
+      ? http('POST', '/api/session/python/registermodule', { moduleName: REG_NAME, contents: helperSrc }, b)
+          .then(function (r) { if (r && r.status && r.status.code) throw new Error(JSON.stringify(r.status)); return REG_NAME; })
+      : Promise.resolve(AUTO_NAME);
+    return reg.then(function (m) {
+      return execOn(b, m, 'info', []).then(function (i) {
+        if (!i.ok) throw new Error(i.error);
+        if (here && i.machine && String(i.machine).toLowerCase() === String(here).toLowerCase())
+          throw new Error('that is this machine (' + i.machine + ')');
+        if (i.role && !/director|solo/i.test(i.role)) throw new Error(i.machine + ' is ' + i.role + ', not the director');
+        return { base: b, mod: m, machine: i.machine, role: i.role };
+      });
+    }).catch(function (e) {
+      errs.push(b + ': ' + (e && e.message || e));
+      return tryDirector(list.slice(1), here, errs);
+    });
+  }
+  function directorReady(here) {
+    if (dirReady) return dirReady;
+    dirReady = tryDirector(directorCandidates(), here, []).then(function (d) {
+      director = d;
+      log('Director follows editor: director is ' + (d.machine || '?') + (d.role ? ' (' + d.role + ')' : '') + ' at ' + d.base, 'ok');
+      return d;
+    }, function (e) { dirReady = null; throw e; });
+    return dirReady;
+  }
+  function syncError(e) {
+    var m = e && e.message || String(e);
+    followText('', 'error', m);
+    if (m !== lastErr) { log('Output sync: ' + m, 'bad'); lastErr = m; }
+  }
+  function syncTick() {
+    clearTimeout(syncTimer);
+    if (syncMode === 'off') return;
+    var mode = syncMode;
+    call('output_state').then(function (r) {
+      if (!r.ok) throw new Error(r.error);
+      if (!r.active) { followText('', r.reason); lastPushed = null; return SYNC_IDLE_MS; }
+      var local = r.local, dir = r.director, step = null;
+      var after = { here: local, director: dir };       // modes once this tick's change lands
+      // A send the director accepted should show up in its state here soon;
+      // if it doesn't, say so once instead of looking fine.
+      if (sent && (dir === sent.mode || mode !== 'lead')) sent = null;
+      if (sent && !sent.warned && Date.now() > sent.until) {
+        sent.warned = true;
+        log('Director follows editor: the director accepted ' + MODE_NAMES[sent.mode] + ' but this editor still sees it on ' +
+            MODE_NAMES[dir] + '. Check the director\'s state bar.', 'bad');
+      }
+      if (mode === 'follow' && local !== dir) {
+        step = call('set_output', dir).then(function (x) {
+          if (!x.ok) throw new Error(x.error);
+          after.here = x.now;
+          log('Editor follows director: ' + x.was + ' → ' + x.mode, 'ok');
+        });
+      } else if (mode === 'lead' && local !== dir && local !== lastPushed) {
+        lastPushed = local;                               // once per change, even if it fails
+        step = directorReady(r.machine).then(function (d) {
+          return execOn(d.base, d.mod, 'set_output', [local, 'director']);
+        }).then(function (x) {
+          if (!x.ok) throw new Error('director: ' + x.error);
+          sent = { mode: local, until: Date.now() + SENT_WAIT_MS, warned: false };
+          log('Director follows editor: ' + x.was + ' → ' + x.mode, 'ok');
+        });
+      } else if (mode === 'lead' && local === dir) {
+        lastPushed = local;
+      }
+      return (step || Promise.resolve()).then(function () {
+        lastErr = '';
+        followText('live', after.here === after.director ? MODE_NAMES[after.here]
+                   : 'here ' + MODE_NAMES[after.here] + ', director ' + MODE_NAMES[after.director] +
+                     (sent ? ' (sent ' + MODE_NAMES[sent.mode] + ')' : ''));
+        return SYNC_MS;
+      });
+    }).catch(function (e) { syncError(e); return SYNC_IDLE_MS; })
+      .then(function (ms) { if (syncMode !== 'off') syncTimer = setTimeout(syncTick, ms); });
+  }
+  $('sync').onclick = function () {
+    syncMode = SYNC_MODES[(SYNC_MODES.indexOf(syncMode) + 1) % SYNC_MODES.length];
+    store.set('lt.sync', syncMode);
+    showSync();
+    log(SYNC_LABELS[syncMode], 'hd');
+    lastPushed = null; lastErr = ''; sent = null;
+    syncTick();
+  };
+  showSync();
+
   showSelected([]);
-  connect();
+  connect().then(syncTick);
 })();
 </script>
 </body>

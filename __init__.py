@@ -10,6 +10,11 @@ Every public function returns a JSON string.
     run(action_id)       run one action on every selected layer
     probe()              dump member names of the first selected layer
     find_uid(text)       which layer has this UID: its track and start time
+    output_state()       read-only: this machine's and the director's output
+                         mode (hold / fade up / fade down), if syncing applies
+    set_output(mode, which)  set an output mode: which='local' sets this
+                         machine's (editor following); 'director' sets the
+                         director state editors read (called on the director)
     check_arrows()       read-only: list arrows on the current track that are
                          invalid or point at something that is not a layer of
                          this track
@@ -68,7 +73,7 @@ class Problem(ValueError):
     replaces it with d3's Exception class, which can't be built from a string
     ("TypeError: Can't construct Exception(str)", 26 Oct)."""
 
-VERSION = '0.9.2'
+VERSION = '0.9.7'
 
 # How a linked field refers to the same field on another layer. getByUID()
 # survives renames; the field is appended with a dot.
@@ -1109,6 +1114,81 @@ def _probe_impl():
     else:
         out['layer'] = 'nothing selected'
     return _dumps(out)
+
+
+# ------------------------------------------------------- follow / lead
+# LocalState.output is the state bar's output mode, per machine. The window
+# keeps an unlocked editor and the director in step both ways: it reads
+# output_state() here, calls set_output() here to follow the director, and
+# calls set_output() on the director's own API to lead it.
+OUTPUT_MODES = {0: u'fade down', 1: u'fade up', 2: u'hold'}
+
+
+def _output_state_impl():
+    """This machine's and the director's output modes, and whether syncing
+    applies (only on an editor unlocked from the director). Read-only."""
+    host, role = _machine()
+    out = {'machine': host, 'role': role}
+    ls = _cls('LocalState')
+    if ls is None:
+        return _ok(active=False, reason=u'LocalState not available', **out)
+    try:
+        here, director = ls.localState(), ls.directorState()
+    except BaseException as e:
+        return _ok(active=False, reason=u'cannot read output state: ' + _errmsg(e), **out)
+    if here is None or director is None:
+        return _ok(active=False, reason=u'no director state (not in a session?)', **out)
+    if here is director or _uid_or_none(here) == _uid_or_none(director):
+        return _ok(active=False, reason=u'this machine is the director', **out)
+    st = globals().get('state')
+    try:
+        locked = bool(st.lockedToDirector)
+    except BaseException:
+        return _ok(active=False, reason=u'cannot tell if this editor is locked', **out)
+    if locked:
+        return _ok(active=False, reason=u'locked to director (already in step)', **out)
+    loc, dir_ = int(here.output), int(director.output)
+    for v in (loc, dir_):
+        if v not in OUTPUT_MODES:
+            return _ok(active=False, reason=u'output mode %d not recognised' % v, **out)
+    return _ok(active=True, local=loc, director=dir_, localMode=OUTPUT_MODES[loc],
+               directorMode=OUTPUT_MODES[dir_], **out)
+
+
+def _set_output_impl(mode, which=u'local'):
+    """Set an output mode (0 fade down, 1 fade up, 2 hold).
+    which='local': this machine's LocalState.localState() (an editor following).
+    which='director': LocalState.directorState(), the state editors read. On a
+    dedicated director localState() is a separate object: setting it was
+    accepted but editors never saw it (SRV101, 4 Nov)."""
+    mode = int(mode)
+    if mode not in OUTPUT_MODES:
+        raise Problem('output mode %d not recognised' % mode)
+    ls = _cls('LocalState')
+    if ls is None:
+        raise Problem('LocalState not available')
+    which = unicode(which)
+    if which not in (u'local', u'director'):
+        raise Problem('which must be local or director, not %s' % which)
+    target = ls.directorState() if which == u'director' else ls.localState()
+    if target is None:
+        raise Problem('no %s state' % which)
+    was = int(target.output)
+    if was != mode:
+        target.output = mode
+    local = ls.localState()
+    same = local is target or (local is not None and _uid_or_none(local) == _uid_or_none(target))
+    host, role = _machine()
+    return _ok(mode=OUTPUT_MODES[mode], was=OUTPUT_MODES.get(was, unicode(was)), changed=was != mode,
+               now=int(target.output), which=which, sameAsLocal=same, machine=host, role=role)
+
+
+def output_state():
+    return _guard(_output_state_impl)
+
+
+def set_output(mode, which=u'local'):
+    return _guard(_set_output_impl, mode, which)
 
 
 def info():

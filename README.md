@@ -1,4 +1,4 @@
-# Layer Tools
+# <img src="icon.svg" alt="" width="40" align="top"> Layer Tools
 
 A disguise Designer plugin: a list of one-click actions applied to the layers selected in the timeline.
 
@@ -19,6 +19,8 @@ A disguise Designer plugin: a list of one-click actions applied to the layers se
 - **Show UID** / **Find by UID** — shows a layer's UID, or jumps the playhead to the layer with a given UID.
 - **Check arrows** — read-only list of broken or duplicated arrows on the current track.
 - **This PC / director** — works from an editor machine using that machine's own selection.
+- **Output sync** — one button: off, editor follows director, or director follows editor, for hold, fade up
+  and fade down on an unlocked editor.
 
 ## Use
 Open **Layer Tools** from Designer's plugin menu, select one or more layers, click an action (hover for what it does).
@@ -46,6 +48,29 @@ The **this PC** / **director** button in the header picks which Designer the win
 on an editor it reads that editor's selection. **director** uses the address Designer passes in
 `?director=`. Hover the green dot to see which machine and role answered; if this PC's API can't be
 reached, the window falls back to the director and says so in the log.
+
+## Output sync
+One button under the UID box syncs the output mode (hold, fade up, fade down) between the director and an
+editor that is **unlocked** from it. Use it in the window on that editor; hover it for a description. Click to
+cycle:
+
+- **Output sync: off** (default) — nothing is synced.
+- **Editor follows director** — when the director's mode differs, the editor copies it.
+- **Director follows editor** — when the editor's mode changes, the director copies it. This changes the
+  director's output. The editor sends the change to the director's own API and runs Layer Tools'
+  `set_output(mode, 'director')` there, which sets `LocalState.directorState()`, the state editors read. (On a
+  dedicated director, `localState()` is a separate object, so setting it changed nothing the editors could
+  see.) If the editor still doesn't see the change 3 seconds after the director accepted it, the log says so
+  once. To find the director it tries the director hostname from Designer's session status, then
+  `<hostname>.local`, then the page's `?director=` address, on this machine's API port. Before using one it
+  asks that machine who it is and rejects it if it's this editor or not the director. The log says which
+  machine and address it used, or why each one failed. Each change is sent once, so a failed send is logged
+  and not retried in a loop.
+
+Once a second the window reads both modes (`LocalState.localState()` / `.directorState()`). Nothing happens on the
+director, in Solo, on an editor that is still locked (Designer already keeps those in step), or if either value
+can't be read; the line under the button says which. Changes and errors are logged. Syncing runs from this
+window, so keep Layer Tools open on that editor. The setting is remembered per machine.
 
 ## Find a layer by UID
 Type or paste a UID in the box (`0x1a2b…`, a plain number, or a whole `getByUID(0x…).field` expression)
