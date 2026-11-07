@@ -7,7 +7,9 @@ Layer Tools is in beta. Versions restarted at 0.9.0 when the plugin moved to thi
   updating.
 - The helper uploaded by the window is now called `layer_tools_live`. If the upload fails, the window looks for
   the copy Designer loaded at startup under several possible names, and logs which one it used.
-- Install and update instructions in the README.
+- Release packaging: `python tools/build_release.py` checks the version is the same everywhere and builds
+  `dist/layer-tools-<version>.zip`, which unzips to a `layer-tools` folder ready for a project's `plugins`
+  folder. Install and update instructions in the README.
 
 ## 0.9.7
 - **Director follows editor** now sets the director state that editors read. On a dedicated director the
