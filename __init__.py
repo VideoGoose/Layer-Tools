@@ -73,7 +73,7 @@ class Problem(ValueError):
     replaces it with d3's Exception class, which can't be built from a string
     ("TypeError: Can't construct Exception(str)", 26 Oct)."""
 
-VERSION = '0.9.7'
+VERSION = '0.9.8'
 
 # How a linked field refers to the same field on another layer. getByUID()
 # survives renames; the field is appended with a dot.

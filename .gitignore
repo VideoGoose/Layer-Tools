@@ -1,2 +1,5 @@
 # Compiled by Designer's Python when it loads the plugin
 *.pyc
+
+# Release zips built from this repo
+dist/

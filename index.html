@@ -7,7 +7,7 @@
 <meta name="disguise-plugin-window-size" content="260,360">
 <meta name="disguise-plugin-window-min-size" content="180,140">
 <meta name="disguise-plugin-window-resizable" content="true">
-<title>Layer Tools v0.9.7</title>
+<title>Layer Tools v0.9.8</title>
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="icon" type="image/png" sizes="256x256" href="icon.png">
 <style>
@@ -67,7 +67,7 @@
 </head>
 <body>
 <header>
-  <img class="logo" src="icon.svg" alt=""><span class="title">Layer Tools</span><span class="ver" id="ver">v0.9.7</span>
+  <img class="logo" src="icon.svg" alt=""><span class="title">Layer Tools</span><span class="ver" id="ver">v0.9.8</span>
   <span class="spacer"></span>
   <button id="arrows" title="Check arrows (read-only): list arrows on this track that are invalid, duplicated, or point at something that isn't a layer here">&#x21c4;</button>
   <button id="probe" title="Probe: dump the selected layer's fields to the log">?</button>
@@ -84,9 +84,12 @@
 <script>
 (function () {
   'use strict';
-  var VERSION = '0.9.7';
-  var REG_NAME = 'gus_lt';               // registered fresh from __init__.py each time the window opens
-  var AUTO_NAME = 'gus_layertools';      // the same code, auto-loaded by Designer at startup
+  var VERSION = '0.9.8';
+  var REG_NAME = 'layer_tools_live';     // registered fresh from __init__.py each time the window opens
+  // The same code, auto-loaded by Designer at startup under a name taken from
+  // the plugin folder (layer-tools). A hyphen isn't valid in a Python module
+  // name and Designer's naming isn't documented, so each is tried in turn.
+  var AUTO_NAMES = ['layer-tools', 'user_module_layer-tools', 'layer_tools', 'user_module_layer_tools'];
   var $ = function (id) { return document.getElementById(id); };
   var apiBase = '', mod = REG_NAME, busy = false, selected = [], session = null, helperSrc = null;
   var store = { get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -163,9 +166,20 @@
       if (r && r.status && r.status.code) throw new Error(JSON.stringify(r.status));
       mod = REG_NAME;
     }).catch(function (e) {
-      log('register from folder failed (' + e.message + ') → using auto-loaded ' + AUTO_NAME, 'bad');
-      mod = AUTO_NAME;
+      return pickAuto(undefined).then(function (m) {
+        log('register from folder failed (' + e.message + ') → using auto-loaded ' + m, 'bad');
+        mod = m;
+      });
     });
+  }
+  // First auto-loaded module name that answers info() at base.
+  function pickAuto(base, names) {
+    names = names || AUTO_NAMES.slice();
+    if (!names.length) return Promise.reject(new Error('Layer Tools helper not found (tried ' + AUTO_NAMES.join(', ') + ')'));
+    return execOn(base, names[0], 'info', []).then(function (i) {
+      if (!i.ok) throw new Error(i.error);
+      return names[0];
+    }).catch(function () { return pickAuto(base, names.slice(1)); });
   }
 
   // ---- UI -----------------------------------------------------------------
@@ -408,7 +422,7 @@
     var reg = helperSrc
       ? http('POST', '/api/session/python/registermodule', { moduleName: REG_NAME, contents: helperSrc }, b)
           .then(function (r) { if (r && r.status && r.status.code) throw new Error(JSON.stringify(r.status)); return REG_NAME; })
-      : Promise.resolve(AUTO_NAME);
+      : pickAuto(b);
     return reg.then(function (m) {
       return execOn(b, m, 'info', []).then(function (i) {
         if (!i.ok) throw new Error(i.error);

@@ -22,6 +22,19 @@ A disguise Designer plugin: a list of one-click actions applied to the layers se
 - **Output sync** — one button: off, editor follows director, or director follows editor, for hold, fade up
   and fade down on an unlocked editor.
 
+## Install
+1. Download `layer-tools-<version>.zip` from the
+   [Releases page](https://github.com/VideoGoose/Layer-Tools/releases), or clone this repository.
+2. Put the `layer-tools` folder in your Designer project's `plugins` folder, so that `d3plugin.json` sits at
+   `<project>/plugins/layer-tools/d3plugin.json`.
+3. In Designer, open the plugins menu and choose **Layer Tools**. If it isn't listed, restart Designer.
+
+**Updating:** replace the files in `<project>/plugins/layer-tools`, then close and reopen the Layer Tools
+window; the version badge in its header shows which version is running. If you used a copy from before 0.9.8
+in a folder called `gus_layertools`, delete that folder so the plugin isn't listed twice.
+
+Developed and tested on Designer r32.4. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
+
 ## Use
 Open **Layer Tools** from Designer's plugin menu, select one or more layers, click an action (hover for what it does).
 The log at the bottom reports per layer what happened. **↻** re-reads `__init__.py`, so you can edit
