@@ -23,9 +23,11 @@ A disguise Designer plugin: a list of one-click actions applied to the layers se
   and fade down on an unlocked editor.
 
 ## Install
-1. Download `layer-tools-<version>.zip` from the
-   [Releases page](https://github.com/VideoGoose/Layer-Tools/releases), or clone this repository.
-2. Put the `layer-tools` folder in your Designer project's `plugins` folder, so that `d3plugin.json` sits at
+1. Download `layer-tools.zip` from the
+   [Releases page](https://github.com/VideoGoose/Layer-Tools/releases), or clone this repository into a
+   folder called `layer-tools`.
+2. Extract it (Windows: right-click → **Extract All**, which makes a `layer-tools` folder) and put that folder
+   in your Designer project's `plugins` folder, so that `d3plugin.json` sits at
    `<project>/plugins/layer-tools/d3plugin.json`.
 3. In Designer, open the plugins menu and choose **Layer Tools**. If it isn't listed, restart Designer.
 
